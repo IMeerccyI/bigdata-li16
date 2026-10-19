@@ -1,0 +1,88 @@
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: li16-namenode
+    hostname: namenode
+    environment: &hadoop-environment
+      CLUSTER_NAME: li16-hdfs
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      HDFS_CONF_dfs_replication: 1
+      HDFS_CONF_dfs_permissions_enabled: "false"
+      HDFS_CONF_dfs_namenode_datanode_registration_ip___hostname___check: "false"
+    ports:
+      - "9872:9870"
+    volumes:
+      - namenode-data:/hadoop/dfs/name
+    healthcheck:
+      test: ["CMD-SHELL", "hdfs dfs -ls / >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: li16-datanode
+    hostname: datanode
+    environment:
+      <<: *hadoop-environment
+      SERVICE_PRECONDITION: namenode:9870
+    volumes:
+      - datanode-data:/hadoop/dfs/data
+    depends_on:
+      namenode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:9864/ >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  hive-init:
+    image: apache/hive:4.0.0
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R hive:hive /opt/hive/data"]
+    volumes:
+      - hive-data:/opt/hive/data
+
+  hiveserver2:
+    image: apache/hive:4.0.0
+    container_name: li16-hiveserver2
+    hostname: hiveserver2
+    environment:
+      SERVICE_NAME: hiveserver2
+      HIVE_CUSTOM_CONF_DIR: /hive_custom_conf
+      HIVESERVER2_PID_DIR: /run/hive
+    tmpfs:
+      - /run/hive:mode=1777
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    volumes:
+      - hive-data:/opt/hive/data
+      - ./config/hive:/hive_custom_conf:ro
+      - ./sql:/opt/hive/queries:ro
+    depends_on:
+      hive-init:
+        condition: service_completed_successfully
+      namenode:
+        condition: service_healthy
+      datanode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/10000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+networks:
+  default:
+    name: li16-hive-hdfs
+
+volumes:
+  namenode-data:
+  datanode-data:
+  hive-data:
